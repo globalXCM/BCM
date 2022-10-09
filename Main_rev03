@@ -1,0 +1,1034 @@
+#include <SPI.h>
+#include "variant.h"
+#include <due_can.h>
+
+#define LowSideSwitch1CSN 29
+#define LowSideSwitch2CSN 71 
+#define LowSideSwitchIdle 62
+
+//CAN Messages
+char Lighting_Status_CAN[2] = {0x00, 0x00};
+char Body_Status_CAN[6] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+char Accessories_Status_CAN[2] = {0x00, 0x00};
+
+//Requests from software or user inputs
+char Light_Request_External[2] = {0x00, 0x00}; //Byte 0 = User requested external lights, Byte 1 = Software requested external lights
+char Light_Request_External_Ext[2] = {0x00, 0x00}; //Byte 0 = User requested external lights, Byte 1 = Software requested external lights
+char Light_Request_External_ButtonStatus[8]= {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; 
+//Right Headlight, Left Headlight, Rear Fog Light, Parking Lights, Left Indicators, Right Indicators, Front Fog Lights, Brake Lights
+char Light_Request_External_ButtonStatus2 [8]= {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; 
+//X,X,X,X,Rear Running Lights, Hazard Indicators
+
+char Light_Request_Internal[2] = {0x00, 0x00}; //Byte 0 = User requested internal lights, Byte 1 = Software requested internal lights
+char Accessories_Request[2] = {0x00, 0x00}; //Byte 0 = User requested Wiper & Washer, Byte 1 = Software requested Wiper & Washer
+char Bluetooth_Request[1] = {0x00}; //1 = Internal Power Outlets
+char WiFi_Rx_byte = 0;
+
+//Definition of Control Outputs
+int BrakeLight_Left = 12;
+int BrakeLight_Right = 33;
+int BrakeLight_High = 34;
+int Indicators_Left= 8;
+int Indicators_Right= 9;
+int ParkingLights_Front=35;
+int RunningLights_Rear = 36;
+int RunningLight_FrontRight=6;
+int RunningLight_FrontLeft=7;
+int HighBeams_LeftRight=37;
+int FogLight_FrontLeft=3;
+int FogLight_FrontRight=5; 
+int FogLight_Rear= 11;
+int BrakePedalSensor_AnalogIn = A0;
+int EcuMainRelay = 39; //För att driva ECU-relä
+int StarterRelay = 40; //För att driva Startmotorrelä
+int AccessoriesRelay = 41; //För att driva tillbehörsrelä
+
+//Definition of State Variables
+int IgnitionSequenced = 0; //State Variable inidicating if the Ignition Sequence has been run
+int State = 0; //State of the system (0 = Sleep, 1 = Ignition / Run, 2 = Crank)
+int StateRead = 0;
+int EngineStarted = 0;
+int RemoteEngineStartReq = 0;
+int NormalEngineStartReq = 0;
+uint16_t EngineSpeed = 400;
+int AlarmState=0; //State of the Alarm (0=Unarmed, 1 Armed, 2 Active)
+int AlarmIllumination=0;
+
+int Input_Sensing_Reset = 43;
+int Input_Sensing_ChipSelect = 42;
+int Input_Sensing_Interrupt = 51;
+
+int Input_Register_0=0;
+int Input_Register_1=0;
+int Input_Register_2=0;
+int Input_Register_3=0;
+
+int Input_Register_0_LS; //Last State Variables
+int Input_Register_1_LS; //Last State Variables
+int Input_Register_2_LS; //Last State Variables
+int Input_Register_3_LS; //Last State Variables
+
+int SPI_Receive1 = 0;
+int SPI_Receive2 = 0;
+int SPI_Receive3 = 0;
+int SPI_Receive4 = 0;
+
+int BluetoothReceive=0;
+
+unsigned long PreviousMillis_Input_Surveillance_Subsystem = 0;
+unsigned long PreviousMillis_Alarm_Control_Subsystem = 0;
+unsigned long PreviousMillis_External_Light_Control_Subsystem = 0;
+unsigned long PreviousMillis_Internal_Light_Control_Subsystem = 0;
+unsigned long PreviousMillis_Wiper_Washer_Control_Subsystem = 0;
+unsigned long PreviousMillis_Charging_Control_Subsystem = 0;
+unsigned long PreviousMillis_Start_Stop_Control_Subsystem = 0;
+unsigned long PreviousMillis_Power_Windows_Control_Subsystem = 0;
+unsigned long PreviousMillis_Locks_Control_Subsystem = 0;
+unsigned long PreviousMillis_Internal_Power_Outlets_Control_Subsystem = 0;
+unsigned long PreviousMillis_Sunscreen_Control_Subsystem = 0;
+unsigned long PreviousMillis_Mileage_Control_Subsystem = 0;
+unsigned long PreviousMillis_Diagnostic_Subsystem = 0;
+unsigned long PreviousMillis_WiFi_Subsystem = 0;
+unsigned long PreviousMillis_Bluetooth_Subsystem = 0;
+unsigned long PreviousMillis_Can100 = 0;
+unsigned long IgnitionButtonCounter = 0;
+unsigned long IgnitionButtonCounter_delta = 0;
+unsigned long SleepCounter = 0;
+
+unsigned int MasterReceive = 0;
+unsigned long LowSideDriver_1 =   0b1000000000000000;
+unsigned long LowSideDriver_2 =   0b1000000000000001;
+
+class Indicator_Flasher
+{
+    // Class Member Variables
+    // These are initialized at startup
+    int Indicator_Position;      // the number of the LED pin
+    long OnTime;     // milliseconds of on-time
+    long OffTime;    // milliseconds of off-time
+
+    // These maintain the current state
+    int ledState;                 // ledState used to set the LED
+    unsigned long previousMillis;   // will store last time LED was updated
+
+    // Constructor - creates a Flasher
+    // and initializes the member variables and state
+  public:
+    Indicator_Flasher(int led, long on, long off)
+    {
+      Indicator_Position = led;
+      OnTime = on;
+      OffTime = off;
+
+      ledState = LOW;
+      previousMillis = 0;
+    }
+
+    void Update()
+    {
+      // check to see if it's time to change the state of the LED
+      unsigned long currentMillis = millis();
+
+      if ((ledState == HIGH) && (currentMillis - previousMillis >= OnTime))
+      {
+        ledState = LOW;  // Turn it off
+        previousMillis = currentMillis;  // Remember the time
+        if (Indicator_Position == 1) {
+          digitalWrite(Indicators_Left, LOW);
+          }
+        if (Indicator_Position == 2) {
+          digitalWrite(Indicators_Right, LOW);
+        }
+        if (Indicator_Position == 3) {
+          digitalWrite(Indicators_Right, LOW);
+          digitalWrite(Indicators_Left, LOW);
+        }
+        if (Indicator_Position == 4) {
+          bitWrite(LowSideDriver_2,0,0);
+          digitalWrite(LowSideSwitch2CSN, LOW);
+          SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODE1 fungerar inte kommunikationen ö.h.t.
+          MasterReceive = SPI.transfer16(LowSideDriver_2);
+          SPI.endTransaction();
+          digitalWrite(LowSideSwitch2CSN, HIGH);
+        }
+      }
+      else if ((ledState == LOW) && (currentMillis - previousMillis >= OffTime))
+      {
+        ledState = HIGH;  // turn it on
+        previousMillis = currentMillis;   // Remember the time
+        if (Indicator_Position == 1) {
+          //bitWrite(Light_Request_External[0], 4, ledState);
+          digitalWrite(Indicators_Left, HIGH);
+        }
+        if (Indicator_Position == 2) {
+          //bitWrite(Light_Request_External[0], 5, ledState);
+          digitalWrite(Indicators_Right, HIGH);
+        }
+        if (Indicator_Position == 3) {
+          //bitWrite(Light_Request_External[0], 5, ledState);
+          digitalWrite(Indicators_Right, HIGH);
+          digitalWrite(Indicators_Left, HIGH);
+        }
+        if (Indicator_Position == 4) {
+          bitWrite(LowSideDriver_2,0,1);
+          digitalWrite(LowSideSwitch2CSN, LOW);
+          SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODE1 fungerar inte kommunikationen ö.h.t.
+          MasterReceive = SPI.transfer16(LowSideDriver_2);
+          SPI.endTransaction();
+          digitalWrite(LowSideSwitch2CSN, HIGH);
+        }
+      }
+    }
+};
+
+Indicator_Flasher Indicator_Left(1, 350, 350);  //1 = Left, 100 = onTime, 400 = offTime
+Indicator_Flasher Indicator_Right(2, 350, 350); //2 = Right, 100 = onTime, 400 = offTime
+Indicator_Flasher Indicator_Hazard(3, 350, 350); //3 = Hazard, 400 = onTime, 400 = offTime
+Indicator_Flasher Indicator_Alarm(4, 25, 5000); //3 = Hazard, 400 = onTime, 400 = offTime
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("---------------------------------------------");
+  Serial.println("Serial Communication with globalXCM Activated");
+  Serial.println("---------------------------------------------");
+  SPI.begin();
+  Serial.println("SPI Communication Activated");
+  SPI.setClockDivider(SPI_CLOCK_DIV4);
+
+
+  Serial.println("---------------------------------------------");
+  Serial.println("CAN Communication with globalXCM Activated");
+  Serial.println("---------------------------------------------");
+
+  Serial3.begin(9600); 
+  Serial.println("Bluetooth connection activated");
+  Serial.println("Default password is 1234 or 000"); 
+  Serial.println("---------------------------------------------");
+
+  Serial1.begin(115200);
+  Serial.println("WiFi connection activated");
+  Serial.println("---------------------------------------------");
+
+  pinMode(Input_Sensing_ChipSelect, OUTPUT);
+  pinMode(Input_Sensing_Reset, OUTPUT);
+  pinMode(Input_Sensing_Interrupt, INPUT);
+    
+  pinMode(HighBeams_LeftRight, OUTPUT);
+  pinMode(ParkingLights_Front, OUTPUT);
+  pinMode(FogLight_Rear, OUTPUT);
+  pinMode(FogLight_FrontLeft, OUTPUT);
+  pinMode(FogLight_FrontRight, OUTPUT);
+  pinMode(Indicators_Left, OUTPUT);
+  pinMode(Indicators_Right, OUTPUT);
+  pinMode(BrakeLight_Left, OUTPUT);
+  pinMode(BrakeLight_Right, OUTPUT);
+  pinMode(BrakeLight_High, OUTPUT);
+  pinMode(RunningLights_Rear, OUTPUT);
+  pinMode(RunningLight_FrontRight, OUTPUT);
+  pinMode(RunningLight_FrontLeft, OUTPUT);
+  pinMode(BrakePedalSensor_AnalogIn, INPUT);
+  pinMode(EcuMainRelay, OUTPUT);
+  pinMode(StarterRelay, OUTPUT);
+
+  pinMode(LowSideSwitch1CSN, OUTPUT);
+  pinMode(LowSideSwitch2CSN, OUTPUT);
+  pinMode(LowSideSwitchIdle, OUTPUT);
+
+  pinMode(AccessoriesRelay, OUTPUT);
+
+  digitalWrite(LowSideSwitch1CSN, HIGH);
+  digitalWrite(LowSideSwitch2CSN, HIGH);
+  digitalWrite(LowSideSwitchIdle, HIGH);
+
+  digitalWrite(Input_Sensing_ChipSelect, HIGH);
+  digitalWrite(Input_Sensing_Reset, LOW);
+  
+  //Skriv till Input Enable Register
+  digitalWrite(Input_Sensing_ChipSelect, LOW);
+  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODEX fungerar inte kommunikationen ö.h.t.
+  SPI_Receive1 = SPI.transfer(0b10110110); //00011011
+  SPI_Receive2 = SPI.transfer(0b11111111); //
+  SPI_Receive3 = SPI.transfer(0b11111111); //
+  SPI_Receive4 = SPI.transfer(0b11111111); //Enable Input 1
+  SPI.endTransaction();
+  digitalWrite(Input_Sensing_ChipSelect, HIGH);
+
+  // delay(2);
+  //Skriv till THRES_COMP_REG
+  digitalWrite(Input_Sensing_ChipSelect, LOW);
+  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODEX fungerar inte kommunikationen ö.h.t.
+  SPI_Receive1 = SPI.transfer(0b11000010); //
+  SPI_Receive2 = SPI.transfer(0b00000000); //
+  SPI_Receive3 = SPI.transfer(0b00000000); //
+  SPI_Receive4 = SPI.transfer(0b11111111); //0110
+  SPI.endTransaction();
+  digitalWrite(Input_Sensing_ChipSelect, HIGH);
+
+  // delay(2);
+  //Skriv till Config Register
+  digitalWrite(Input_Sensing_ChipSelect, LOW);
+  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODEX fungerar inte kommunikationen ö.h.t.
+  SPI_Receive1 = SPI.transfer(0b10110100); //Config Register
+  SPI_Receive2 = SPI.transfer(0b00000000); //
+  SPI_Receive3 = SPI.transfer(0b00010000); //(0b00110000); 
+  SPI_Receive4 = SPI.transfer(0b00000000); //(0b00000001);
+  // Serial.println(SPI_Receive1);
+  // Serial.println(SPI_Receive2);
+  // Serial.println(SPI_Receive3);
+  // Serial.println(SPI_Receive4);
+  digitalWrite(Input_Sensing_ChipSelect, HIGH);
+  SPI.endTransaction();
+
+  // delay(2);
+  //Skriv till Interrupt Enaple Register 1
+  digitalWrite(Input_Sensing_ChipSelect, LOW);
+  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODEX fungerar inte kommunikationen ö.h.t.
+  SPI_Receive1 = SPI.transfer(0b11000100); //Interrupt Enaple Register 1
+  SPI_Receive2 = SPI.transfer(0b11111111); //
+  SPI_Receive3 = SPI.transfer(0b11111111); //
+  SPI_Receive4 = SPI.transfer(0b11111111); //
+  // Serial.println(SPI_Receive1,BIN);
+  // Serial.println(SPI_Receive2,BIN);
+  // Serial.println(SPI_Receive3,BIN);
+  // Serial.println(SPI_Receive4,BIN);
+  digitalWrite(Input_Sensing_ChipSelect, HIGH);
+  SPI.endTransaction();
+
+  // delay(2);
+  //Skriv till Interrupt Enaple Register 2
+  digitalWrite(Input_Sensing_ChipSelect, LOW);
+  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODEX fungerar inte kommunikationen ö.h.t.
+  SPI_Receive1 = SPI.transfer(0b11000110); //Interrupt Enaple Register 2
+  SPI_Receive2 = SPI.transfer(0b11111111); //
+  SPI_Receive3 = SPI.transfer(0b11111111); //
+  SPI_Receive4 = SPI.transfer(0b11111110); //
+  // Serial.println(SPI_Receive1,BIN);
+  // Serial.println(SPI_Receive2,BIN);
+  // Serial.println(SPI_Receive3,BIN);
+  // Serial.println(SPI_Receive4,BIN);
+  digitalWrite(Input_Sensing_ChipSelect, HIGH);
+  SPI.endTransaction();
+
+  Can0.begin(CAN_BPS_500K);
+  Can0.watchFor();
+
+}
+
+void loop() {
+//CAN bus Governor
+  if ((millis() - PreviousMillis_Can100) > 100) {
+     sendData();
+  }
+
+  if (Can0.available() > 0) {
+    receiveCAN();
+  }
+  // This is the main loop that controls state and cycles through the subfunctions at pre-decided intervals. This system also surveills certain high important sensors such as Brake Pedal Sensor.
+
+  if (millis() - PreviousMillis_Input_Surveillance_Subsystem > 200) { //Should Initiate Input Surveillance Subsystem on INTERRUPT
+      //Serial.println("Kontrollerar Knappstatus");
+      PreviousMillis_Input_Surveillance_Subsystem = millis();
+      Input_Surveillance_Subsystem();
+  }
+  if (millis() - PreviousMillis_Alarm_Control_Subsystem > 100) { //Initiate Alarm Control Subsystem each 500ms
+    PreviousMillis_Alarm_Control_Subsystem = millis();
+    Alarm_Control_Subsystem();
+  }
+  if (millis() - PreviousMillis_External_Light_Control_Subsystem >= 300) { //Initiate External Light Control Subsystem each 250 ms
+    PreviousMillis_External_Light_Control_Subsystem = millis();
+    // Serial.println(PreviousMillis_External_Light_Control_Subsystem);
+    // Serial.println("External Light Control Subsystem Called");
+    External_Light_Control_Subsystem();
+  }
+  if (millis() - PreviousMillis_Internal_Light_Control_Subsystem > 200) { //Initiate External Light Control Subsystem each 750 ms
+    PreviousMillis_Internal_Light_Control_Subsystem = millis();
+    Internal_Light_Control_Subsystem();
+  }
+  if (millis() - PreviousMillis_Wiper_Washer_Control_Subsystem > 250) { //Initiate External Light Control Subsystem each 250 ms
+    PreviousMillis_Wiper_Washer_Control_Subsystem = millis();
+    Wiper_Washer_Control_Subsystem();
+  }
+  if (millis() - PreviousMillis_Charging_Control_Subsystem > 100) { //Initiate External Light Control Subsystem each 100 ms
+    PreviousMillis_Charging_Control_Subsystem = millis();
+    Charging_Control_Subsystem();
+  }
+  if (millis() - PreviousMillis_Start_Stop_Control_Subsystem > 200) { //Initiate External Light Control Subsystem each 200 ms
+    PreviousMillis_Start_Stop_Control_Subsystem = millis();
+    Start_Stop_Control_Subsystem();
+  }
+  if (millis() - PreviousMillis_Power_Windows_Control_Subsystem > 200) { //Initiate External Light Control Subsystem each 200 ms
+    PreviousMillis_Power_Windows_Control_Subsystem = millis();
+    Power_Windows_Control_Subsystem();
+  }
+  if (millis() - PreviousMillis_Locks_Control_Subsystem > 100) { //Initiate External Light Control Subsystem each 100 ms
+    PreviousMillis_Locks_Control_Subsystem  = millis();
+    Locks_Control_Subsystem();
+  }
+  if (millis() - PreviousMillis_Internal_Power_Outlets_Control_Subsystem > 1000) { //Initiate External Light Control Subsystem each 1000 ms
+    PreviousMillis_Internal_Power_Outlets_Control_Subsystem = millis();
+    Power_Outlets_Control_Subsystem();
+  }
+  if (millis() - PreviousMillis_Sunscreen_Control_Subsystem > 500) { //Initiate External Light Control Subsystem each 500 ms
+    PreviousMillis_Sunscreen_Control_Subsystem = millis();
+    Sunscreen_Control_Subsystem();
+  }
+  if (millis() - PreviousMillis_Mileage_Control_Subsystem > 250) { //Initiate External Light Control Subsystem each 250 ms
+    PreviousMillis_Mileage_Control_Subsystem = millis();
+    Mileage_Control_Subsystem();
+  }
+  if (millis() - PreviousMillis_Diagnostic_Subsystem > 500) { //Initiate External Light Control Subsystem each 5000 ms
+    PreviousMillis_Diagnostic_Subsystem = millis();
+    Diagnostic_Subsystem();
+  }
+  if (millis() - PreviousMillis_WiFi_Subsystem > 150) { //Initiate External Light Control Subsystem each 150 ms
+    PreviousMillis_WiFi_Subsystem = millis();
+    WiFi_Subsystem();
+  }
+  if (millis() - PreviousMillis_Bluetooth_Subsystem > 150) { //Initiate External Light Control Subsystem each 150 ms
+    PreviousMillis_Bluetooth_Subsystem = millis();
+    Bluetooth_Subsystem();
+  }
+
+  if (State == 0){
+    if (millis()-SleepCounter > 5000){
+      //Sleep Mode
+      Serial.println("Sleep Mode Activated");
+      State = 3;
+    }
+  }
+}
+
+
+void Input_Surveillance_Subsystem() { //This is the Input Surveillance Subsystem that reacts to inputs from the TIC12400-Q1 unit on the PCB. It reads input data and stores them in pre-decided variables.
+  //Serial.println("Input Surveillance Subsystem");
+  digitalWrite(Input_Sensing_ChipSelect , LOW);
+  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODEX fungerar inte kommunikationen ö.h.t.
+  Input_Register_3 = SPI.transfer(0b00001010); //Read Comparator Register
+  Input_Register_2 = SPI.transfer(0b00000000); //Read Comparator Register
+  Input_Register_1 = SPI.transfer(0b00000000); //Read Comparator Register
+  Input_Register_0 = SPI.transfer(0b00000001); //Read Comparator Register
+  // Serial.println(Input_Register_3,BIN);
+  // Serial.println(Input_Register_2,BIN); //{Trunk Switch, Hood Switch, Door Switch 4, Wiper Switch, Hazard Light, Horn, Front Fog Light, High Beam Stalk}
+  // Serial.println(Input_Register_1,BIN); //{Right Indicator, Left Indicator, Rear Fog Light, Park Light Switch, Running Light Switch, Door Switch 3, Door Switch 2, Door Switch 1}
+  // Serial.println(Input_Register_0,BIN); //{Windshield Washer, 6, 5, 4, StartStopSwitch/Crank, Neutral Switch Gearbox, 1, LSB}
+  // Serial.println();
+  SPI.endTransaction();
+  digitalWrite(Input_Sensing_ChipSelect , HIGH);
+
+  if (Input_Register_0 != Input_Register_0_LS || Input_Register_1 != Input_Register_1_LS || Input_Register_2 != Input_Register_2_LS || Input_Register_3 != Input_Register_3_LS && State == 0) {
+    SleepCounter = millis();
+    Serial.println("Sleepcounter satt");
+  } 
+  if ((Input_Register_0 != Input_Register_0_LS || Input_Register_1 != Input_Register_1_LS || Input_Register_2 != Input_Register_2_LS || Input_Register_3 != Input_Register_3_LS) && State == 3) {
+    State = 0;
+    Serial.println("Vaknade upp");
+  } 
+
+  Input_Register_3_LS = Input_Register_3;
+  Input_Register_2_LS = Input_Register_2; 
+  Input_Register_1_LS = Input_Register_1; 
+  Input_Register_0_LS = Input_Register_0; 
+
+  //Measure time ignition button is pushed
+  if (bitRead(Input_Register_0, 3) == 0 && StateRead == 0 && AlarmState == 0){ //First push, From Sleep to Ignition on
+    IgnitionButtonCounter = millis();
+    StateRead = 1;
+    // Serial.println("Tryck registerat");
+  } else if (bitRead(Input_Register_0, 3) == 1 && StateRead == 2){ //Second push, From Igniton on to Engine Crank
+    IgnitionButtonCounter_delta = millis() - IgnitionButtonCounter;
+    StateRead = 3;
+    // Serial.println("Släpp registerat");
+    // Serial.println (IgnitionButtonCounter_delta);
+  }
+
+  if (bitRead(Input_Register_0,3) == 1 && StateRead==1){
+    StateRead = 2; 
+  } else if (bitRead(Input_Register_0,3) == 1 && StateRead==3){
+    StateRead = 0;
+  }
+
+  Body_Status_CAN[5]=State;
+
+  //Start Indicators & Hazard Lights
+  if (bitRead(Input_Register_2, 3) == 0 && Light_Request_External_ButtonStatus2[5]==0) { //If hazard indication requested, update hazard indicator, otherwise turn it off.
+    Light_Request_External_ButtonStatus2[5]=1;
+    bitWrite(Light_Request_External_Ext[0], 5, 1);
+  } else if (bitRead(Input_Register_2, 3) == 1 && Light_Request_External_ButtonStatus2[5]==1) {
+    Light_Request_External_ButtonStatus2[5]=2;  
+  } else if (bitRead(Input_Register_2, 3) == 0 && Light_Request_External_ButtonStatus2[5]==2) {
+  bitWrite(Light_Request_External_Ext[0], 5, 0);  
+    Light_Request_External_ButtonStatus2[5]=3;
+  } else if (bitRead(Input_Register_2, 3) == 1 && Light_Request_External_ButtonStatus2[5]==3) {
+    Light_Request_External_ButtonStatus2[5]=0;
+  } 
+  
+  if (bitRead(Input_Register_1, 6) == 0) { //If right indication requested, update right indicator, otherwise turn it off.
+    bitWrite(Light_Request_External[0], 4, 1);
+  } else if (bitRead(Input_Register_2, 3) == 1) {
+   //Serial.println("Blinkers nollad");
+    bitWrite(Light_Request_External[0], 4, 0);
+  }
+
+  if (bitRead(Input_Register_1, 7) == 0) { //If left indication requested, update left indicator, otherwise turn it off.
+    //Indicator_Right.Update();
+    bitWrite(Light_Request_External[0], 5, 1);
+  } else if (bitRead(Input_Register_2, 3) == 1) {
+    bitWrite(Light_Request_External[0], 5, 0);
+  }
+  //END Indicators
+
+  //Start Input Buttons
+  if (bitRead(Input_Register_1, 4) == 0) { //If Parking Light on requested, update Parking Light Request Byte, otherwise turn it off.
+    bitWrite(Light_Request_External[0], 3, 1);
+  } else {
+    bitWrite(Light_Request_External[0], 3, 0);
+  }
+
+  // Serial.println(bitRead(Light_Request_External[0],3));
+
+  if (bitRead(Input_Register_1, 3) == 0 && State != 0 && State !=3) { //If Running Lights on requested, update Left & Right Headlight Request Byte, otherwise turn it off.
+    // bitWrite(Light_Request_External[0], 1, 1);
+    bitWrite(Light_Request_External[0], 0, 1);
+  } else {
+    // bitWrite(Light_Request_External[0], 1, 0);
+    bitWrite(Light_Request_External[0], 0, 0);
+  }
+  
+  
+  if (bitRead(Input_Register_2, 0) == 0) { //If High Beam requested, update High Beam Left&Right Request Byte, otherwise turn it off.
+    bitWrite(Light_Request_External_Ext[0], 0, 1);
+    bitWrite(Light_Request_External_Ext[0], 1, 1);
+    //Serial.println("Flash To Pass On");
+  } else {
+    bitWrite(Light_Request_External_Ext[0], 0, 0);
+    bitWrite(Light_Request_External_Ext[0], 1, 0);
+    //Serial.println("Flash To Pass Off");
+  }
+
+  if (bitRead(Input_Register_1, 5) == 0 && Light_Request_External_ButtonStatus[2] == 0) { //If Rear Fog Light on requested, update Rear Fog Light Request Byte, otherwise turn it off.
+    Light_Request_External_ButtonStatus[2] = 1;
+    bitWrite(Light_Request_External[0], 2, 1);
+  } else if (bitRead(Input_Register_1, 5) == 1 && Light_Request_External_ButtonStatus[2] == 1) {
+    Light_Request_External_ButtonStatus[2] = 2;  
+  } else if (bitRead(Input_Register_1, 5) == 0 && Light_Request_External_ButtonStatus[2] == 2) {
+    bitWrite(Light_Request_External[0], 2, 0);  
+    Light_Request_External_ButtonStatus[2] = 3;
+  } else if (bitRead(Input_Register_1, 5) == 1 && Light_Request_External_ButtonStatus[2] == 3) {
+    Light_Request_External_ButtonStatus[2] = 0;
+  } 
+
+    if (bitRead(Input_Register_2, 1) == 0 && Light_Request_External_ButtonStatus[6] == 0) { //If Front Fog Light on requested, update Front Fog Light Request Byte, otherwise turn it off.
+    Light_Request_External_ButtonStatus[6] = 1;
+    bitWrite(Light_Request_External[0], 6, 1);
+  } else if (bitRead(Input_Register_2, 1) == 1 && Light_Request_External_ButtonStatus[6] == 1) {
+    Light_Request_External_ButtonStatus[6] = 2;  
+  } else if (bitRead(Input_Register_2, 1) == 0 && Light_Request_External_ButtonStatus[6] == 2) {
+    bitWrite(Light_Request_External[0], 6, 0);
+    Light_Request_External_ButtonStatus[6] = 3;
+  } else if (bitRead(Input_Register_2, 1) == 1 && Light_Request_External_ButtonStatus[6] == 3) {
+    Light_Request_External_ButtonStatus[6] = 0;
+  } 
+  //End Input Buttons
+
+  //Body Input Switched
+  if (bitRead(Input_Register_1, 0)==0){ //Door Front Left
+    bitWrite(Body_Status_CAN[2],0,1);
+  } else if (bitRead(Input_Register_1, 0)){
+    bitWrite(Body_Status_CAN[2],0,0);
+  }
+
+  if (bitRead(Input_Register_1, 1)==0){ //Door Front Right
+    bitWrite(Body_Status_CAN[2],6,1);
+  } else if (bitRead(Input_Register_1, 1)){
+    bitWrite(Body_Status_CAN[2],6,0);
+  }
+
+  if (bitRead(Input_Register_1, 2)==0){ //Door Rear Left
+    bitWrite(Body_Status_CAN[2],4,1);
+  } else if (bitRead(Input_Register_1, 2)){
+    bitWrite(Body_Status_CAN[2],4,0);
+  }
+
+  if (bitRead(Input_Register_2, 5)==0){ //Door Rear Right
+    bitWrite(Body_Status_CAN[2],2,1);
+  } else if (bitRead(Input_Register_2, 5)){
+    bitWrite(Body_Status_CAN[2],2,0);
+  }
+
+  if (bitRead(Input_Register_2, 6)==0){ //Hood
+    bitWrite(Body_Status_CAN[3],2,1);
+  } else if (bitRead(Input_Register_2, 6)){
+    bitWrite(Body_Status_CAN[3],2,0);
+  }
+
+  if (bitRead(Input_Register_2, 7)==0){ //Trunk 
+    bitWrite(Body_Status_CAN[3],0,1);
+  } else if (bitRead(Input_Register_2, 7)){
+    bitWrite(Body_Status_CAN[3],0,0);
+  }
+
+  if (bitRead(Input_Register_2, 2)==0){ //Horn 
+    bitWrite(Accessories_Status_CAN[0],4,1);
+    bitWrite(Accessories_Request[0], 2, 1);
+  } else if (bitRead(Input_Register_2, 2)){
+    bitWrite(Accessories_Status_CAN[0],4,0);
+    bitWrite(Accessories_Request[0], 2, 0);
+  }
+
+  if (bitRead(Input_Register_2, 4)==0){ //Wiper
+    bitWrite(Accessories_Status_CAN[0],0,1);
+    bitWrite(Accessories_Request[0], 0, 1);
+  } else if (bitRead(Input_Register_2, 4)){
+    bitWrite(Accessories_Status_CAN[0],0,0);
+    bitWrite(Accessories_Request[0], 0, 0);
+  }
+
+  if (bitRead(Input_Register_0, 7)==0){ //Washer
+    bitWrite(Accessories_Status_CAN[0],3,1);
+    bitWrite(Accessories_Request[0], 1, 1);
+  } else if (bitRead(Input_Register_0, 7)){
+    bitWrite(Accessories_Status_CAN[0],3,0);
+    bitWrite(Accessories_Request[0], 1, 0);
+  }
+  
+}
+
+void Alarm_Control_Subsystem() { //This is the Alarm Control Subsystem that trigger the alarm in case of theft attempt.
+  if (AlarmState == 1){ //Alarm Indicator
+    Indicator_Alarm.Update();
+  } else   if (AlarmState == 0){
+    bitWrite(LowSideDriver_2,0,0);
+    digitalWrite(LowSideSwitch2CSN, LOW);
+    SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODE1 fungerar inte kommunikationen ö.h.t.
+    MasterReceive = SPI.transfer16(LowSideDriver_2);
+    SPI.endTransaction();
+    digitalWrite(LowSideSwitch2CSN, HIGH);
+  }
+  
+  if (AlarmState !=0){
+    if (Body_Status_CAN[2] > 0 or Body_Status_CAN[3] > 0 or AlarmState == 2){
+      Serial.println("Larmet aktiverat");
+      AlarmState=2;
+      Serial.println("Alarm satt till 2");
+      if (AlarmIllumination==0){
+        //Helst ska dessa vara en intern ljusbegäran
+        //Skicka intern ljusbegäran på
+        bitWrite(Light_Request_External[1],0,1);
+        bitWrite(Light_Request_External[1],2,1);
+        bitWrite(Light_Request_External[1],3,1);
+        bitWrite(Light_Request_External[1],4,1);
+        bitWrite(Light_Request_External[1],5,1);
+        bitWrite(Light_Request_External[1],6,1);
+        bitWrite(Light_Request_External_Ext[1],4,1);
+        bitWrite(Accessories_Status_CAN[0],4,1);
+        bitWrite(Accessories_Request[0], 2, 1);
+        AlarmIllumination=1;
+      } else if(AlarmIllumination==1){
+        //Skicka intern ljusbegäran av
+        bitWrite(Light_Request_External[1],0,0);
+        bitWrite(Light_Request_External[1],2,0);
+        bitWrite(Light_Request_External[1],3,0);
+        bitWrite(Light_Request_External[1],4,0);
+        bitWrite(Light_Request_External[1],5,0);
+        bitWrite(Light_Request_External[1],6,0);
+        bitWrite(Accessories_Status_CAN[0],4,0);
+        bitWrite(Accessories_Request[0], 2, 0);
+        AlarmIllumination=0;
+      }
+    } 
+  } 
+  if (AlarmState == 0 && State == 0) {
+    // Serial.println("Ljusbegäran av");
+    bitWrite(Light_Request_External[1],0,0);
+    bitWrite(Light_Request_External[1],2,0);
+    bitWrite(Light_Request_External[1],3,0);
+    bitWrite(Light_Request_External[1],4,0);
+    bitWrite(Light_Request_External[1],5,0);
+    bitWrite(Light_Request_External[1],6,0);
+    //bitWrite(Light_Request_External_Ext[1],4,0);      
+  }
+  Body_Status_CAN[4] = AlarmState; 
+}
+
+void External_Light_Control_Subsystem() { //This is the subsystem for control of all external lights (and Horn) such as running light, indicators, puddle lights e.t.c.
+  
+  if (bitRead(Light_Request_External_Ext[0], 5) == 1 or bitRead(Light_Request_External_Ext[1], 5) == 1) { // Hazard Lights
+    Indicator_Hazard.Update();
+    bitWrite(Lighting_Status_CAN[1],1,1);
+  } else if (bitRead(Light_Request_External_Ext[0], 5) == 0 and bitRead(Light_Request_External_Ext[1], 5) == 0 and bitRead(Light_Request_External[0], 4) != 1 and bitRead(Light_Request_External[0], 5) != 1 ) {
+    digitalWrite(Indicators_Left, LOW);
+    digitalWrite(Indicators_Right, LOW);
+    bitWrite(Lighting_Status_CAN[1],1,0);
+  }
+
+  if (State==0){
+    digitalWrite(RunningLight_FrontLeft, LOW);
+    digitalWrite(RunningLight_FrontRight, LOW);
+    //Parking Lights Front
+    if (bitRead(Light_Request_External[0], 3) == 1 or bitRead(Light_Request_External[1], 3) == 1) { // Parking Lights FrontS
+      digitalWrite(ParkingLights_Front, HIGH);
+      bitWrite(Lighting_Status_CAN[1],0,1);
+    } else if (bitRead(Light_Request_External[0], 3) == 0 and bitRead(Light_Request_External[1], 3) == 0) {
+      digitalWrite(ParkingLights_Front, LOW);
+      bitWrite(Lighting_Status_CAN[1],0,0);
+    }
+    if (bitRead(Light_Request_External[0], 3) == 1 or bitRead(Light_Request_External[1], 3) == 1) { //Rear Running Lights
+      digitalWrite(RunningLights_Rear, HIGH);
+      bitWrite(Lighting_Status_CAN[0], 7, 1);
+      // Serial.println("P-Ljus På");
+    } else if (bitRead(Light_Request_External[0], 3) == 0 and bitRead(Light_Request_External[1], 3) == 0) {
+      digitalWrite(RunningLights_Rear, LOW);
+      bitWrite(Lighting_Status_CAN[0], 7, 0);
+      // Serial.println("P-Ljus Av");
+    }
+  }
+  
+ if(State == 1 or AlarmState == 2 or AlarmState == 0){
+  if (bitRead(Accessories_Request[0], 2) == 1 or bitRead(Accessories_Request[1], 2) == 1) { //Horn
+    bitWrite(LowSideDriver_2,2,1);
+    digitalWrite(LowSideSwitch2CSN, LOW);
+    SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODE1 fungerar inte kommunikationen ö.h.t.
+    MasterReceive = SPI.transfer16(LowSideDriver_2);
+    SPI.endTransaction();
+    digitalWrite(LowSideSwitch2CSN, HIGH);
+  } else if (bitRead(Accessories_Request[0], 2) == 0 and bitRead(Accessories_Request[1], 2) == 0) {
+    bitWrite(LowSideDriver_2,2,0);
+    digitalWrite(LowSideSwitch2CSN, LOW);
+    SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODE1 fungerar inte kommunikationen ö.h.t.
+    MasterReceive = SPI.transfer16(LowSideDriver_2);
+    SPI.endTransaction();
+    digitalWrite(LowSideSwitch2CSN, HIGH);
+  }
+    if (bitRead(Light_Request_External[0], 5) == 1 or bitRead(Light_Request_External[1], 5) == 1) { //Right Indicator
+      Indicator_Right.Update();
+      bitWrite(Lighting_Status_CAN[0], 1, 1);
+    } else if (bitRead(Light_Request_External[0], 5) == 0 and bitRead(Light_Request_External[1], 5) == 0 and bitRead(Light_Request_External_Ext[0],5) != 1) {
+      digitalWrite(Indicators_Right, LOW);
+      bitWrite(Lighting_Status_CAN[0], 1, 0);
+    }
+
+    if (bitRead(Light_Request_External[0], 4) == 1 or bitRead(Light_Request_External[1], 4) == 1) { //Left Indicator
+      Indicator_Left.Update();
+      bitWrite(Lighting_Status_CAN[0], 0, 1);
+    } else if (bitRead(Light_Request_External[0], 4) == 0 and bitRead(Light_Request_External[1], 4) == 0  and bitRead(Light_Request_External_Ext[0],5) != 1) {
+      digitalWrite(Indicators_Left, LOW);
+      bitWrite(Lighting_Status_CAN[0], 0, 0);
+    }
+
+    if (bitRead(Light_Request_External[0], 2) == 1 or bitRead(Light_Request_External[1], 2) == 1) { //Rear Fog Light
+      digitalWrite(FogLight_Rear, HIGH);
+      bitWrite(Lighting_Status_CAN[0],5,1);
+    } else if (bitRead(Light_Request_External[0], 2) == 0 and bitRead(Light_Request_External[1], 2) == 0) {
+      digitalWrite(FogLight_Rear, LOW);
+      bitWrite(Lighting_Status_CAN[0],5,0);
+    }
+    
+    //Rear Fog Lights
+    if (bitRead(Light_Request_External[0], 6) == 1 or bitRead(Light_Request_External[1], 6) == 1) { 
+      digitalWrite(FogLight_FrontRight, HIGH);
+      digitalWrite(FogLight_FrontLeft, HIGH);
+      bitWrite(Lighting_Status_CAN[0],3,1);
+      bitWrite(Lighting_Status_CAN[0],4,1);
+    } else if (bitRead(Light_Request_External[0], 6) == 0 and bitRead(Light_Request_External[1], 6) == 0) {
+      digitalWrite(FogLight_FrontRight, LOW);
+      digitalWrite(FogLight_FrontLeft, LOW);
+      bitWrite(Lighting_Status_CAN[0],3,0);
+      bitWrite(Lighting_Status_CAN[0],4,0);
+    }
+
+    //High Beams
+    if (bitRead(Light_Request_External_Ext[0], 0) == 1 or bitRead(Light_Request_External_Ext[1], 0) == 1) {
+      digitalWrite(HighBeams_LeftRight, HIGH);
+      bitWrite(Lighting_Status_CAN[0],6,1);
+    } else if (bitRead(Light_Request_External_Ext[0], 0) == 0 and bitRead(Light_Request_External_Ext[1], 0) == 0) {
+      digitalWrite(HighBeams_LeftRight, LOW);
+      bitWrite(Lighting_Status_CAN[0],6,0);
+    }
+
+    if (bitRead(Light_Request_External[0], 0) == 1 or bitRead(Light_Request_External[1], 0) == 1) {
+      // Serial.println(bitRead(Light_Request_External[0], 0));
+      digitalWrite(RunningLight_FrontLeft, HIGH);
+      digitalWrite(RunningLight_FrontRight, HIGH);
+      digitalWrite(RunningLights_Rear, HIGH);
+      // Serial.println("Running Lights on");
+      bitWrite(Lighting_Status_CAN[0],7,1);
+    } else if (bitRead(Light_Request_External[0], 0) == 0 and bitRead(Light_Request_External[1], 0) == 0) {
+      digitalWrite(RunningLight_FrontLeft, LOW);
+      digitalWrite(RunningLight_FrontRight, LOW);
+      bitWrite(Lighting_Status_CAN[0],7,0);
+    }
+
+  if (bitRead(Light_Request_External[0], 3) == 1 or bitRead(Light_Request_External[1], 3) == 1) { // Parking Lights FrontS
+    digitalWrite(ParkingLights_Front, HIGH);
+    digitalWrite(RunningLights_Rear, HIGH);
+    bitWrite(Lighting_Status_CAN[1],0,1);
+  } else if (bitRead(Light_Request_External[0], 3) == 0 and bitRead(Light_Request_External[1], 3) == 0) {
+    digitalWrite(ParkingLights_Front, LOW);
+    bitWrite(Lighting_Status_CAN[1],0,0);
+  }
+ }
+
+
+  if(State == 2 and AlarmState == 0){
+    digitalWrite(RunningLight_FrontLeft, LOW);
+    digitalWrite(RunningLight_FrontRight, LOW);
+    digitalWrite(RunningLights_Rear, LOW);
+    digitalWrite(ParkingLights_Front, LOW);
+    digitalWrite(HighBeams_LeftRight, LOW);
+    digitalWrite(FogLight_FrontLeft, LOW);
+    digitalWrite(FogLight_FrontRight, LOW);
+
+    bitWrite(Lighting_Status_CAN[0],0,0);
+    bitWrite(Lighting_Status_CAN[0],1,0);
+    bitWrite(Lighting_Status_CAN[0],2,0);
+    bitWrite(Lighting_Status_CAN[0],3,0);
+    bitWrite(Lighting_Status_CAN[0],4,0);
+    bitWrite(Lighting_Status_CAN[0],5,0);
+    bitWrite(Lighting_Status_CAN[0],6,0);
+    bitWrite(Lighting_Status_CAN[0],7,0);
+    bitWrite(Lighting_Status_CAN[1],0,0);
+  }
+
+  if (analogRead(BrakePedalSensor_AnalogIn) > 1){
+    digitalWrite(BrakeLight_Left, HIGH);
+    digitalWrite(BrakeLight_Right, HIGH);
+    digitalWrite(BrakeLight_High, HIGH);
+    bitWrite(Lighting_Status_CAN[0],2,1);
+  } else if (analogRead(BrakePedalSensor_AnalogIn) < 1){
+    digitalWrite(BrakeLight_Left, LOW);
+    digitalWrite(BrakeLight_Right, LOW);
+    digitalWrite(BrakeLight_High, LOW);
+    bitWrite(Lighting_Status_CAN[0],2,0);
+  } 
+}
+
+void Internal_Light_Control_Subsystem() { //This is the subsystem for control of all internal lights such as ambient lightning, IPC indicators e.t.c.
+// Serial.println("Internal Light Control Subsystem Called");
+  //Serial.println("Internal Light Control Subsystem");
+}
+
+void Wiper_Washer_Control_Subsystem() { //This is the subsystem for control of the window wipers and washer system
+  //Serial.println("Wiper and Washer Control Subsystem");
+  if (State !=0){
+    if (bitRead(Accessories_Request[0], 0) == 1 or bitRead(Accessories_Request[1], 0) == 1) { //Wiper
+      bitWrite(LowSideDriver_2,4,1);
+      digitalWrite(LowSideSwitch2CSN, LOW);
+      SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODE1 fungerar inte kommunikationen ö.h.t.
+      MasterReceive = SPI.transfer16(LowSideDriver_2);
+      SPI.endTransaction();
+      digitalWrite(LowSideSwitch2CSN, HIGH);
+    } else if (bitRead(Accessories_Request[0], 0) == 0 and bitRead(Accessories_Request[1], 0) == 0) {
+      bitWrite(LowSideDriver_2,4,0);
+      digitalWrite(LowSideSwitch2CSN, LOW);
+      SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODE1 fungerar inte kommunikationen ö.h.t.
+      MasterReceive = SPI.transfer16(LowSideDriver_2);
+      SPI.endTransaction();
+      digitalWrite(LowSideSwitch2CSN, HIGH);
+    }
+
+    if (bitRead(Accessories_Request[0], 1) == 1 or bitRead(Accessories_Request[1], 1) == 1) { //Washer
+      bitWrite(LowSideDriver_2,6,1);
+      digitalWrite(LowSideSwitch2CSN, LOW);
+      SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODE1 fungerar inte kommunikationen ö.h.t.
+      MasterReceive = SPI.transfer16(LowSideDriver_2);
+      SPI.endTransaction();
+      digitalWrite(LowSideSwitch2CSN, HIGH);
+    } else if (bitRead(Accessories_Request[0], 1) == 0 and bitRead(Accessories_Request[1], 1) == 0) {
+      bitWrite(LowSideDriver_2,6,0);
+      digitalWrite(LowSideSwitch2CSN, LOW);
+      SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODE1 fungerar inte kommunikationen ö.h.t.
+      MasterReceive = SPI.transfer16(LowSideDriver_2);
+      SPI.endTransaction();
+      digitalWrite(LowSideSwitch2CSN, HIGH);
+    }
+  }
+}
+
+void Charging_Control_Subsystem() { //This is the subsystem for control of the charging system, i.e. generator to battery.
+  //Serial.println("Charging Control Subsystem");
+}
+
+void Start_Stop_Control_Subsystem() { //This is the subsystem for control of the engine start and stop induced by the driver
+  //Serial.println("Start & Stop Control Subsystem");
+  //Set State, Sleep, Ignition/Run or Crank
+  if (IgnitionButtonCounter_delta > 2000 && State == 0 && IgnitionSequenced == 0 && AlarmState == 0){
+    //Ignition On Without Engine Start
+    State = 1;
+    IgnitionSequenced = 1;
+    Serial.println("Ignition On");
+    IgnitionButtonCounter_delta = 0;
+  } else if (IgnitionButtonCounter_delta > 200 && IgnitionButtonCounter_delta < 2000 && State == 0 && IgnitionSequenced == 0  && AlarmState == 0){
+    //Ignition On and Engine Start Request
+    State = 2;
+    IgnitionSequenced = 1;
+    Serial.println("Crank Requested");
+    IgnitionButtonCounter_delta = 0;
+    NormalEngineStartReq=1;
+  } else if (IgnitionButtonCounter_delta > 5 && IgnitionButtonCounter_delta < 2000 && State != 0 && IgnitionSequenced == 1  && AlarmState == 0){
+    //Ignition Off
+    State=0;
+    IgnitionSequenced = 0;
+    IgnitionButtonCounter_delta = 0;
+    NormalEngineStartReq = 0;
+    RemoteEngineStartReq = 0;
+    digitalWrite(StarterRelay, LOW); //REDUNDANT???
+    digitalWrite(EcuMainRelay, LOW);
+    Serial.println("Ignition Off");
+  } 
+  // Serial.println(IgnitionButtonCounter_delta);
+
+  //Engine Start Request (Remote and Normal)
+  if (NormalEngineStartReq==1 or RemoteEngineStartReq == 1){
+    if (bitRead(Input_Register_0, 2) == 1){
+      Serial.println("Engine Start Prohibited");
+      NormalEngineStartReq = 0;
+      RemoteEngineStartReq = 0;
+      IgnitionSequenced = 1;
+      digitalWrite(StarterRelay, LOW);
+    } else if (EngineSpeed < 500 && bitRead(Input_Register_0, 2) == 0){ //Lägg till funktion för att kontrollera ingångsvärde för växellådsgivare minst 0,1 sekund
+      Serial.println("Engine start initiated");
+      digitalWrite(EcuMainRelay, HIGH);
+      delay(50); // FÖr att ge MaxxECU 50 ms att starta upp ordentligt. Överväg att ta bort denna
+      digitalWrite(StarterRelay, HIGH);
+      // Serial.println("ECU Main Relay High");
+      // Serial.println("Start Relay High");
+      IgnitionSequenced = 1;
+    } else if (EngineSpeed > 500){
+      Serial.println("Motor Startad");
+      State = 1;
+      NormalEngineStartReq = 0;
+      RemoteEngineStartReq = 0;
+      IgnitionSequenced = 1;
+      digitalWrite(StarterRelay, LOW);
+    }
+  }
+}
+
+void Power_Windows_Control_Subsystem() { //This is the subsystem for control of the Power Windows
+  //Serial.println("Power Windows Control Subsystem");
+}
+
+void Locks_Control_Subsystem() { //This is the subsystem for control of the door- and hatch locks
+  //Serial.println("Locks Control Subsystem");
+}
+
+void Power_Outlets_Control_Subsystem() { //This is the subsystem for control of internal power outlets, such as cigarette adapter outlets and USB power.
+  //Serial.println("Power Outlets Control Subsystem");
+  if (State == 1 || bitRead(Bluetooth_Request[0],0)==1){
+    digitalWrite(AccessoriesRelay, HIGH);
+  } else {
+    digitalWrite(AccessoriesRelay, LOW);
+  }
+}
+
+void Sunscreen_Control_Subsystem() { //This is the subsystem for control of roof window.
+  //Serial.println("Sunscreen Control Subsystem");
+}
+
+void Mileage_Control_Subsystem() { //This is the subsystem that keeps track of the vehicles mileage
+  //Serial.println("Mileage Control Subsystem");
+}
+
+void Diagnostic_Subsystem() { //This is the subsystem for diagnostics of BCM related functions
+  //Serial.println("Diagnostic Control Subsystem");
+}
+
+void WiFi_Subsystem() { //This is the subsystem that controls the WiFi-connection
+  //Serial.println("Wifi Control Subsystem");
+}
+
+void Bluetooth_Subsystem() { //This is the subsystem that controls the Bluetooth-connection
+  //Serial.println("Bluetooth Control Subsystem");
+  //Bluetooth Governor
+  if (Serial3.available()){
+    BluetoothReceive = Serial3.read(); 
+    if (BluetoothReceive == 49)  { 
+      if (State==0 || State == 3){
+        AlarmState = 1;
+        Serial.println("Alarm Activated");
+      }
+    } else if (BluetoothReceive == 48)  { 
+      Serial.println("Alarm Deactivated");
+      AlarmState = 0;
+    } else if (BluetoothReceive == 50 && RemoteEngineStartReq == 0  && EngineSpeed < 500){
+      RemoteEngineStartReq=1;
+      Serial.println("Remote Start Requested");
+    } else if (BluetoothReceive == 50 && RemoteEngineStartReq == 1){
+      Serial.println("Remote Start Abandoned");
+      RemoteEngineStartReq = 0;
+    } 
+    if (BluetoothReceive == 51 && bitRead(Bluetooth_Request[0],0) == 1){
+      Serial.println("Power Outlets de-activated");
+      bitWrite(Bluetooth_Request[0], 0, 0);
+    } else if (BluetoothReceive == 51 && bitRead(Bluetooth_Request[0], 0) ==0){
+      bitWrite(Bluetooth_Request[0], 0, 1);
+      Serial.println("Power Outlets activated");
+    }
+  }
+}
+
+void sendData() {
+  CAN_FRAME LightingStatus;
+  LightingStatus.extended = false;
+  LightingStatus.id = 0x110;
+  LightingStatus.length = 2;
+  LightingStatus.priority = 4;
+
+  LightingStatus.data.byte[0] = Lighting_Status_CAN[0];
+  LightingStatus.data.byte[1] = Lighting_Status_CAN[1];
+  Can0.sendFrame(LightingStatus);
+
+  CAN_FRAME AccessoriesStatus;
+  AccessoriesStatus.extended = false;
+  AccessoriesStatus.id = 0x120;
+  AccessoriesStatus.length = 2;
+  AccessoriesStatus.priority = 4;
+  
+  AccessoriesStatus.data.byte[0] = Accessories_Status_CAN[0];
+  AccessoriesStatus.data.byte[1] = Accessories_Status_CAN[1];
+  Can0.sendFrame(AccessoriesStatus);
+
+  CAN_FRAME BodyStatus;
+  BodyStatus.extended = false;
+  BodyStatus.id = 0x130;
+  BodyStatus.length = 6;
+  BodyStatus.priority = 4;
+  
+  BodyStatus.data.byte[0] = Body_Status_CAN[0];
+  BodyStatus.data.byte[1] = Body_Status_CAN[1];
+  BodyStatus.data.byte[2] = Body_Status_CAN[2];
+  BodyStatus.data.byte[3] = Body_Status_CAN[3];
+  BodyStatus.data.byte[4] = Body_Status_CAN[4];
+  BodyStatus.data.byte[5] = Body_Status_CAN[5];
+  Can0.sendFrame(BodyStatus);
+
+
+  PreviousMillis_Can100 = millis();
+
+  
+}
+
+void receiveCAN(){
+  CAN_FRAME incoming;
+	Can0.read(incoming);
+	// incoming.data.bytes[0] = incoming.data.bytes[0];
+	// incoming.data.bytes[1] = incoming.data.bytes[1];
+	// printFrame(incoming);  //uncomment line to print frames that are going out
+
+  if(incoming.id == 0x520){
+    EngineSpeed = (incoming.data.bytes[1] << 8) + incoming.data.bytes[0];
+  }
+}
+
+void printFrame(CAN_FRAME &frame) {
+   Serial.print("ID: 0x");
+   Serial.print(frame.id, HEX);
+   Serial.print(" Len: ");
+   Serial.print(frame.length);
+   Serial.print(" Data: 0x");
+   for (int count = 0; count < frame.length; count++) {
+       Serial.print(frame.data.bytes[count], HEX);
+       Serial.print(" ");
+   }
+   Serial.print("\r\n");
+}
