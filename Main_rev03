@@ -39,9 +39,9 @@ int FogLight_FrontLeft=3;
 int FogLight_FrontRight=5; 
 int FogLight_Rear= 11;
 int BrakePedalSensor_AnalogIn = A0;
-int EcuMainRelay = 39; //För att driva ECU-relä
-int StarterRelay = 40; //För att driva Startmotorrelä
-int AccessoriesRelay = 41; //För att driva tillbehörsrelä
+int EcuMainRelay = 39; //ECU relay
+int StarterRelay = 40; //Starter Motor Relay
+int AccessoriesRelay = 41; //Accessory Relay
 
 //Definition of State Variables
 int IgnitionSequenced = 0; //State Variable inidicating if the Ignition Sequence has been run
@@ -243,35 +243,33 @@ void setup() {
   digitalWrite(Input_Sensing_ChipSelect, HIGH);
   digitalWrite(Input_Sensing_Reset, LOW);
   
-  //Skriv till Input Enable Register
+  //Configure Input Enable Register
   digitalWrite(Input_Sensing_ChipSelect, LOW);
-  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODEX fungerar inte kommunikationen ö.h.t.
-  SPI_Receive1 = SPI.transfer(0b10110110); //00011011
-  SPI_Receive2 = SPI.transfer(0b11111111); //
-  SPI_Receive3 = SPI.transfer(0b11111111); //
-  SPI_Receive4 = SPI.transfer(0b11111111); //Enable Input 1
+  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); 
+  SPI_Receive1 = SPI.transfer(0b10110110); 
+  SPI_Receive2 = SPI.transfer(0b11111111); 
+  SPI_Receive3 = SPI.transfer(0b11111111); 
+  SPI_Receive4 = SPI.transfer(0b11111111); //Enable All Inputs
   SPI.endTransaction();
   digitalWrite(Input_Sensing_ChipSelect, HIGH);
 
-  // delay(2);
-  //Skriv till THRES_COMP_REG
+  //Configure THRES_COMP_REG
   digitalWrite(Input_Sensing_ChipSelect, LOW);
-  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODEX fungerar inte kommunikationen ö.h.t.
-  SPI_Receive1 = SPI.transfer(0b11000010); //
-  SPI_Receive2 = SPI.transfer(0b00000000); //
-  SPI_Receive3 = SPI.transfer(0b00000000); //
-  SPI_Receive4 = SPI.transfer(0b11111111); //0110
+  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); 
+  SPI_Receive1 = SPI.transfer(0b11000010); 
+  SPI_Receive2 = SPI.transfer(0b00000000); 
+  SPI_Receive3 = SPI.transfer(0b00000000); 
+  SPI_Receive4 = SPI.transfer(0b11111111); 
   SPI.endTransaction();
   digitalWrite(Input_Sensing_ChipSelect, HIGH);
 
-  // delay(2);
-  //Skriv till Config Register
+  //Configure Config Register
   digitalWrite(Input_Sensing_ChipSelect, LOW);
-  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODEX fungerar inte kommunikationen ö.h.t.
-  SPI_Receive1 = SPI.transfer(0b10110100); //Config Register
-  SPI_Receive2 = SPI.transfer(0b00000000); //
-  SPI_Receive3 = SPI.transfer(0b00010000); //(0b00110000); 
-  SPI_Receive4 = SPI.transfer(0b00000000); //(0b00000001);
+  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); 
+  SPI_Receive1 = SPI.transfer(0b10110100);
+  SPI_Receive2 = SPI.transfer(0b00000000); 
+  SPI_Receive3 = SPI.transfer(0b00010000);  
+  SPI_Receive4 = SPI.transfer(0b00000000); 
   // Serial.println(SPI_Receive1);
   // Serial.println(SPI_Receive2);
   // Serial.println(SPI_Receive3);
@@ -279,14 +277,13 @@ void setup() {
   digitalWrite(Input_Sensing_ChipSelect, HIGH);
   SPI.endTransaction();
 
-  // delay(2);
-  //Skriv till Interrupt Enaple Register 1
+  //Configure Interrupt Enaple Register 1
   digitalWrite(Input_Sensing_ChipSelect, LOW);
-  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODEX fungerar inte kommunikationen ö.h.t.
-  SPI_Receive1 = SPI.transfer(0b11000100); //Interrupt Enaple Register 1
-  SPI_Receive2 = SPI.transfer(0b11111111); //
-  SPI_Receive3 = SPI.transfer(0b11111111); //
-  SPI_Receive4 = SPI.transfer(0b11111111); //
+  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); 
+  SPI_Receive1 = SPI.transfer(0b11000100); 
+  SPI_Receive2 = SPI.transfer(0b11111111); 
+  SPI_Receive3 = SPI.transfer(0b11111111); 
+  SPI_Receive4 = SPI.transfer(0b11111111); 
   // Serial.println(SPI_Receive1,BIN);
   // Serial.println(SPI_Receive2,BIN);
   // Serial.println(SPI_Receive3,BIN);
@@ -294,14 +291,13 @@ void setup() {
   digitalWrite(Input_Sensing_ChipSelect, HIGH);
   SPI.endTransaction();
 
-  // delay(2);
-  //Skriv till Interrupt Enaple Register 2
+  //Configure Interrupt Enaple Register 2
   digitalWrite(Input_Sensing_ChipSelect, LOW);
-  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODEX fungerar inte kommunikationen ö.h.t.
-  SPI_Receive1 = SPI.transfer(0b11000110); //Interrupt Enaple Register 2
-  SPI_Receive2 = SPI.transfer(0b11111111); //
-  SPI_Receive3 = SPI.transfer(0b11111111); //
-  SPI_Receive4 = SPI.transfer(0b11111110); //
+  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); 
+  SPI_Receive1 = SPI.transfer(0b11000110); 
+  SPI_Receive2 = SPI.transfer(0b11111111); 
+  SPI_Receive3 = SPI.transfer(0b11111111); 
+  SPI_Receive4 = SPI.transfer(0b11111110); 
   // Serial.println(SPI_Receive1,BIN);
   // Serial.println(SPI_Receive2,BIN);
   // Serial.println(SPI_Receive3,BIN);
@@ -311,7 +307,6 @@ void setup() {
 
   Can0.begin(CAN_BPS_500K);
   Can0.watchFor();
-
 }
 
 void loop() {
@@ -326,7 +321,6 @@ void loop() {
   // This is the main loop that controls state and cycles through the subfunctions at pre-decided intervals. This system also surveills certain high important sensors such as Brake Pedal Sensor.
 
   if (millis() - PreviousMillis_Input_Surveillance_Subsystem > 200) { //Should Initiate Input Surveillance Subsystem on INTERRUPT
-      //Serial.println("Kontrollerar Knappstatus");
       PreviousMillis_Input_Surveillance_Subsystem = millis();
       Input_Surveillance_Subsystem();
   }
@@ -336,8 +330,6 @@ void loop() {
   }
   if (millis() - PreviousMillis_External_Light_Control_Subsystem >= 300) { //Initiate External Light Control Subsystem each 250 ms
     PreviousMillis_External_Light_Control_Subsystem = millis();
-    // Serial.println(PreviousMillis_External_Light_Control_Subsystem);
-    // Serial.println("External Light Control Subsystem Called");
     External_Light_Control_Subsystem();
   }
   if (millis() - PreviousMillis_Internal_Light_Control_Subsystem > 200) { //Initiate External Light Control Subsystem each 750 ms
@@ -391,7 +383,6 @@ void loop() {
 
   if (State == 0){
     if (millis()-SleepCounter > 5000){
-      //Sleep Mode
       Serial.println("Sleep Mode Activated");
       State = 3;
     }
@@ -400,9 +391,8 @@ void loop() {
 
 
 void Input_Surveillance_Subsystem() { //This is the Input Surveillance Subsystem that reacts to inputs from the TIC12400-Q1 unit on the PCB. It reads input data and stores them in pre-decided variables.
-  //Serial.println("Input Surveillance Subsystem");
   digitalWrite(Input_Sensing_ChipSelect , LOW);
-  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODEX fungerar inte kommunikationen ö.h.t.
+  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); 
   Input_Register_3 = SPI.transfer(0b00001010); //Read Comparator Register
   Input_Register_2 = SPI.transfer(0b00000000); //Read Comparator Register
   Input_Register_1 = SPI.transfer(0b00000000); //Read Comparator Register
@@ -417,11 +407,11 @@ void Input_Surveillance_Subsystem() { //This is the Input Surveillance Subsystem
 
   if (Input_Register_0 != Input_Register_0_LS || Input_Register_1 != Input_Register_1_LS || Input_Register_2 != Input_Register_2_LS || Input_Register_3 != Input_Register_3_LS && State == 0) {
     SleepCounter = millis();
-    Serial.println("Sleepcounter satt");
+    Serial.println("Sleepcounter initiated");
   } 
   if ((Input_Register_0 != Input_Register_0_LS || Input_Register_1 != Input_Register_1_LS || Input_Register_2 != Input_Register_2_LS || Input_Register_3 != Input_Register_3_LS) && State == 3) {
     State = 0;
-    Serial.println("Vaknade upp");
+    Serial.println("Woke up");
   } 
 
   Input_Register_3_LS = Input_Register_3;
@@ -433,12 +423,10 @@ void Input_Surveillance_Subsystem() { //This is the Input Surveillance Subsystem
   if (bitRead(Input_Register_0, 3) == 0 && StateRead == 0 && AlarmState == 0){ //First push, From Sleep to Ignition on
     IgnitionButtonCounter = millis();
     StateRead = 1;
-    // Serial.println("Tryck registerat");
+    // Serial.println("Push button registered");
   } else if (bitRead(Input_Register_0, 3) == 1 && StateRead == 2){ //Second push, From Igniton on to Engine Crank
     IgnitionButtonCounter_delta = millis() - IgnitionButtonCounter;
     StateRead = 3;
-    // Serial.println("Släpp registerat");
-    // Serial.println (IgnitionButtonCounter_delta);
   }
 
   if (bitRead(Input_Register_0,3) == 1 && StateRead==1){
@@ -484,25 +472,18 @@ void Input_Surveillance_Subsystem() { //This is the Input Surveillance Subsystem
     bitWrite(Light_Request_External[0], 3, 0);
   }
 
-  // Serial.println(bitRead(Light_Request_External[0],3));
-
   if (bitRead(Input_Register_1, 3) == 0 && State != 0 && State !=3) { //If Running Lights on requested, update Left & Right Headlight Request Byte, otherwise turn it off.
-    // bitWrite(Light_Request_External[0], 1, 1);
     bitWrite(Light_Request_External[0], 0, 1);
   } else {
-    // bitWrite(Light_Request_External[0], 1, 0);
     bitWrite(Light_Request_External[0], 0, 0);
   }
-  
-  
+    
   if (bitRead(Input_Register_2, 0) == 0) { //If High Beam requested, update High Beam Left&Right Request Byte, otherwise turn it off.
     bitWrite(Light_Request_External_Ext[0], 0, 1);
     bitWrite(Light_Request_External_Ext[0], 1, 1);
-    //Serial.println("Flash To Pass On");
   } else {
     bitWrite(Light_Request_External_Ext[0], 0, 0);
     bitWrite(Light_Request_External_Ext[0], 1, 0);
-    //Serial.println("Flash To Pass Off");
   }
 
   if (bitRead(Input_Register_1, 5) == 0 && Light_Request_External_ButtonStatus[2] == 0) { //If Rear Fog Light on requested, update Rear Fog Light Request Byte, otherwise turn it off.
@@ -530,7 +511,7 @@ void Input_Surveillance_Subsystem() { //This is the Input Surveillance Subsystem
   } 
   //End Input Buttons
 
-  //Body Input Switched
+  //Body Input Switches
   if (bitRead(Input_Register_1, 0)==0){ //Door Front Left
     bitWrite(Body_Status_CAN[2],0,1);
   } else if (bitRead(Input_Register_1, 0)){
@@ -599,7 +580,7 @@ void Alarm_Control_Subsystem() { //This is the Alarm Control Subsystem that trig
   } else   if (AlarmState == 0){
     bitWrite(LowSideDriver_2,0,0);
     digitalWrite(LowSideSwitch2CSN, LOW);
-    SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODE1 fungerar inte kommunikationen ö.h.t.
+    SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); 
     MasterReceive = SPI.transfer16(LowSideDriver_2);
     SPI.endTransaction();
     digitalWrite(LowSideSwitch2CSN, HIGH);
@@ -609,10 +590,7 @@ void Alarm_Control_Subsystem() { //This is the Alarm Control Subsystem that trig
     if (Body_Status_CAN[2] > 0 or Body_Status_CAN[3] > 0 or AlarmState == 2){
       Serial.println("Larmet aktiverat");
       AlarmState=2;
-      Serial.println("Alarm satt till 2");
       if (AlarmIllumination==0){
-        //Helst ska dessa vara en intern ljusbegäran
-        //Skicka intern ljusbegäran på
         bitWrite(Light_Request_External[1],0,1);
         bitWrite(Light_Request_External[1],2,1);
         bitWrite(Light_Request_External[1],3,1);
@@ -624,7 +602,6 @@ void Alarm_Control_Subsystem() { //This is the Alarm Control Subsystem that trig
         bitWrite(Accessories_Request[0], 2, 1);
         AlarmIllumination=1;
       } else if(AlarmIllumination==1){
-        //Skicka intern ljusbegäran av
         bitWrite(Light_Request_External[1],0,0);
         bitWrite(Light_Request_External[1],2,0);
         bitWrite(Light_Request_External[1],3,0);
@@ -638,7 +615,6 @@ void Alarm_Control_Subsystem() { //This is the Alarm Control Subsystem that trig
     } 
   } 
   if (AlarmState == 0 && State == 0) {
-    // Serial.println("Ljusbegäran av");
     bitWrite(Light_Request_External[1],0,0);
     bitWrite(Light_Request_External[1],2,0);
     bitWrite(Light_Request_External[1],3,0);
@@ -675,11 +651,9 @@ void External_Light_Control_Subsystem() { //This is the subsystem for control of
     if (bitRead(Light_Request_External[0], 3) == 1 or bitRead(Light_Request_External[1], 3) == 1) { //Rear Running Lights
       digitalWrite(RunningLights_Rear, HIGH);
       bitWrite(Lighting_Status_CAN[0], 7, 1);
-      // Serial.println("P-Ljus På");
     } else if (bitRead(Light_Request_External[0], 3) == 0 and bitRead(Light_Request_External[1], 3) == 0) {
       digitalWrite(RunningLights_Rear, LOW);
       bitWrite(Lighting_Status_CAN[0], 7, 0);
-      // Serial.println("P-Ljus Av");
     }
   }
   
@@ -687,14 +661,14 @@ void External_Light_Control_Subsystem() { //This is the subsystem for control of
   if (bitRead(Accessories_Request[0], 2) == 1 or bitRead(Accessories_Request[1], 2) == 1) { //Horn
     bitWrite(LowSideDriver_2,2,1);
     digitalWrite(LowSideSwitch2CSN, LOW);
-    SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODE1 fungerar inte kommunikationen ö.h.t.
+    SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); 
     MasterReceive = SPI.transfer16(LowSideDriver_2);
     SPI.endTransaction();
     digitalWrite(LowSideSwitch2CSN, HIGH);
   } else if (bitRead(Accessories_Request[0], 2) == 0 and bitRead(Accessories_Request[1], 2) == 0) {
     bitWrite(LowSideDriver_2,2,0);
     digitalWrite(LowSideSwitch2CSN, LOW);
-    SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); //Dessa inställningar är viktiga, utan SPI_MODE1 fungerar inte kommunikationen ö.h.t.
+    SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE1)); 
     MasterReceive = SPI.transfer16(LowSideDriver_2);
     SPI.endTransaction();
     digitalWrite(LowSideSwitch2CSN, HIGH);
@@ -871,11 +845,10 @@ void Start_Stop_Control_Subsystem() { //This is the subsystem for control of the
     IgnitionButtonCounter_delta = 0;
     NormalEngineStartReq = 0;
     RemoteEngineStartReq = 0;
-    digitalWrite(StarterRelay, LOW); //REDUNDANT???
+    digitalWrite(StarterRelay, LOW); 
     digitalWrite(EcuMainRelay, LOW);
     Serial.println("Ignition Off");
   } 
-  // Serial.println(IgnitionButtonCounter_delta);
 
   //Engine Start Request (Remote and Normal)
   if (NormalEngineStartReq==1 or RemoteEngineStartReq == 1){
@@ -885,16 +858,12 @@ void Start_Stop_Control_Subsystem() { //This is the subsystem for control of the
       RemoteEngineStartReq = 0;
       IgnitionSequenced = 1;
       digitalWrite(StarterRelay, LOW);
-    } else if (EngineSpeed < 500 && bitRead(Input_Register_0, 2) == 0){ //Lägg till funktion för att kontrollera ingångsvärde för växellådsgivare minst 0,1 sekund
+    } else if (EngineSpeed < 500 && bitRead(Input_Register_0, 2) == 0){ 
       Serial.println("Engine start initiated");
       digitalWrite(EcuMainRelay, HIGH);
-      delay(50); // FÖr att ge MaxxECU 50 ms att starta upp ordentligt. Överväg att ta bort denna
       digitalWrite(StarterRelay, HIGH);
-      // Serial.println("ECU Main Relay High");
-      // Serial.println("Start Relay High");
       IgnitionSequenced = 1;
     } else if (EngineSpeed > 500){
-      Serial.println("Motor Startad");
       State = 1;
       NormalEngineStartReq = 0;
       RemoteEngineStartReq = 0;
@@ -1002,10 +971,7 @@ void sendData() {
   BodyStatus.data.byte[5] = Body_Status_CAN[5];
   Can0.sendFrame(BodyStatus);
 
-
   PreviousMillis_Can100 = millis();
-
-  
 }
 
 void receiveCAN(){
